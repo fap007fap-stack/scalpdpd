@@ -2,56 +2,84 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 
-DPD_URL = "https://tracktrace.dpd.com.pl/findParcel?query={}&lang=pl_pl"
+BASE_URL = "https://tracktrace.dpd.com.pl/findParcel?query={}&lang=pl_pl"
 
 st.set_page_config(page_title="DPD Tracker", page_icon="📦")
-
-st.title("📦 DPD Tracker – Śledzenie przesyłek bez limitów")
+st.title("📦 DPD Tracker – ulepszona wersja (pełny scraping)")
 
 tracking_number = st.text_input("Podaj numer przesyłki DPD:")
 
-def fetch_dpd_status(number: str):
-    url = DPD_URL.format(number)
-    response = requests.get(url)
+DEBUG = st.checkbox("Pokaż surowy HTML (debug)")
 
-    if response.status_code != 200:
-        return None, "Błąd połączenia z serwerem DPD."
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    table = soup.find("table", class_="table")
+def fetch_dpd(number: str):
+    url = BASE_URL.format(number)
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
 
-    if not table:
-        return None, "Brak danych — numer nie istnieje lub DPD zmieniło stronę."
+    if resp.status_code != 200:
+        return None, "Błąd pobierania strony DPD."
 
+    html = resp.text
+
+    if DEBUG:
+        st.text_area("HTML zwrócony przez DPD:", html, height=300)
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # 1️⃣ Najpierw szukamy klasycznej tabeli
+    table = soup.find("table")
     events = []
-    for row in table.find("tbody").find_all("tr"):
-        cols = row.find_all("td")
-        if len(cols) >= 3:
-            events.append({
-                "date": cols[0].text.strip(),
-                "place": cols[1].text.strip(),
-                "status": cols[2].text.strip()
-            })
+
+    if table:
+        tbody = table.find("tbody")
+        if tbody:
+            for tr in tbody.find_all("tr"):
+                cols = tr.find_all("td")
+                if len(cols) >= 3:
+                    events.append({
+                        "date": cols[0].text.strip(),
+                        "place": cols[1].text.strip(),
+                        "status": cols[2].text.strip(),
+                    })
+
+    # 2️⃣ Jeśli tabela nie istnieje — szukamy komunikatów DPD
+    if not events:
+        possible_boxes = soup.find_all(["p", "div", "span"])
+        messages = []
+
+        for tag in possible_boxes:
+            text = tag.get_text(strip=True)
+            if "brak" in text.lower() or "nie znaleziono" in text.lower() or "nie można" in text.lower():
+                messages.append(text)
+
+        if messages:
+            return None, messages[0]
+
+    # 3️⃣ Jeśli nadal nic — numer może być nieobsługiwany lub układ inny
+    if not events:
+        return None, "Brak dostępnych danych dla tego numeru. Możliwe, że DPD zmieniło układ lub numer jest zagraniczny."
 
     return events, None
 
 
 if st.button("🔍 Sprawdź status"):
     if not tracking_number:
-        st.warning("Podaj numer przesyłki!")
+        st.warning("Podaj numer!")
     else:
-        with st.spinner("Pobieram dane z DPD..."):
-            events, error = fetch_dpd_status(tracking_number)
+        with st.spinner("Łączę z DPD..."):
+            events, error = fetch_dpd(tracking_number)
 
         if error:
             st.error(error)
         else:
-            st.success(f"Znaleziono {len(events)} zdarzeń!")
+            st.success("Znaleziono dane!")
 
-            for event in events:
+            for e in events:
                 st.markdown(
-                    "**📅 {}**  \n🏢 *{}*  \n➡️ {}".format(
-                        event["date"], event["place"], event["status"]
-                    )
+                    f"""
+                    **📅 {e['date']}**  
+                    🏢 _{e['place']}_  
+                    ➡️ {e['status']}
+                    """
                 )
                 st.markdown("---")
