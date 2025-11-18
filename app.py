@@ -49,11 +49,9 @@ if st.button("🔍 Sprawdź status"):
             st.success(f"Znaleziono {len(events)} zdarzeń!")
 
             for event in events:
-                st.write(
-                    f"**📅 {event['date']}**  
-"
-                    f"🏢 *{event['place']}*  
-"
-                    f"➡️ {event['status']}"
+                st.markdown(
+                    "**📅 {}**  \n🏢 *{}*  \n➡️ {}".format(
+                        event["date"], event["place"], event["status"]
+                    )
                 )
                 st.markdown("---")
